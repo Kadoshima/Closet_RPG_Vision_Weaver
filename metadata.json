@@ -1,0 +1,8 @@
+{
+  "name": "Closet RPG: VisionWeaver",
+  "description": "An RPG-themed generative fashion design studio. Create equipment for your real life using AI, sync with your closet, and generate item lore and stats.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
