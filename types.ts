@@ -1,3 +1,4 @@
+
 export enum FlowStep {
   TARGET_SELECT = 'TARGET_SELECT',
   CATEGORY_SELECT = 'CATEGORY_SELECT',
@@ -63,6 +64,17 @@ export interface SearchResult {
     title: string;
     uri: string;
   }[];
+}
+
+export interface BespokeQuote {
+  fabricName: string;
+  fabricCost: number;
+  laborHours: number;
+  laborCost: number;
+  totalCost: number;
+  timeline: string;
+  complexity: 'Low' | 'Medium' | 'High' | 'Masterpiece';
+  comments: string;
 }
 
 export type GenerationStatus = 'idle' | 'generating' | 'complete' | 'error';

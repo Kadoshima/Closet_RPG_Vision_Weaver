@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { GeneratedItem, ProductSpecs, ProductInfo, ClosetItem, SearchResult } from '../types';
+import { GeneratedItem, ProductSpecs, ProductInfo, ClosetItem, SearchResult, BespokeQuote } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
@@ -147,7 +147,7 @@ export const searchItemByImage = async (base64Image: string): Promise<SearchResu
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this fashion item in detail (brand estimate if possible, style, material). Search for this exact item or very similar items available for sale online. Provide a short description and a list of links." }
+          { text: "Identify this fashion item in detail (brand, style, material). Find similar items for sale online. Return a helpful description for a shopper." }
         ]
       },
       config: {
@@ -185,3 +185,55 @@ export const searchItemByImage = async (base64Image: string): Promise<SearchResu
     };
   }
 };
+
+export const estimateBespokeCost = async (base64Image: string): Promise<BespokeQuote> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
+          { 
+            text: `You are a master tailor for high-end bespoke fashion. Analyze this garment image to create a manufacturing cost estimate for a single custom-made piece.
+            
+            Deconstruct the item into:
+            1. Fabric: Identify likely fabric (e.g., Italian Wool, Silk) and estimate yardage required. Estimate cost per yard (premium quality).
+            2. Labor: Estimate hours for pattern making, cutting, and sewing by a skilled tailor.
+            3. Complexity: Assess construction difficulty.
+
+            Return JSON with:
+            - fabricName: string
+            - fabricCost: number (Total fabric cost in USD)
+            - laborHours: number
+            - laborCost: number (Total labor cost in USD, assume $50/hr)
+            - totalCost: number (Sum + 20% margin)
+            - timeline: string (e.g., "4-6 weeks")
+            - complexity: "Low" | "Medium" | "High" | "Masterpiece"
+            - comments: string (Brief expert assessment of construction)`
+          }
+        ]
+      },
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    if (response.text) {
+      return JSON.parse(response.text);
+    }
+    throw new Error("Analysis failed");
+  } catch (e) {
+    console.error(e);
+    // Fallback estimate
+    return {
+      fabricName: "Standard Fabric",
+      fabricCost: 50,
+      laborHours: 10,
+      laborCost: 500,
+      totalCost: 650,
+      timeline: "4 weeks",
+      complexity: "Medium",
+      comments: "Estimation failed, using standard values."
+    };
+  }
+}

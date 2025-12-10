@@ -42,16 +42,6 @@ export const ClosetSidebar: React.FC<ClosetSidebarProps> = ({ closetItems, onIte
 
   return (
     <>
-        {/* Toggle Button */}
-        {!isOpen && (
-            <button 
-                onClick={onToggle}
-                className="fixed top-6 right-6 z-50 bg-white border border-gray-200 text-brand-black p-3 rounded-full shadow-md hover:bg-gray-50 transition-all"
-            >
-                <span className="material-icons">wardrobe</span>
-            </button>
-        )}
-
         {/* Overlay */}
         {isOpen && (
              <div className="fixed inset-0 bg-black/20 z-40 backdrop-blur-sm" onClick={onToggle}></div>

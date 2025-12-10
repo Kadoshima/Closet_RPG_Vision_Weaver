@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { CardOption } from '../types';
 
 interface SelectionCardProps {
@@ -9,6 +9,8 @@ interface SelectionCardProps {
 }
 
 export const SelectionCard: React.FC<SelectionCardProps> = ({ option, selected, onClick, compact }) => {
+  const [imgError, setImgError] = useState(false);
+
   return (
     <div
       onClick={onClick}
@@ -20,15 +22,24 @@ export const SelectionCard: React.FC<SelectionCardProps> = ({ option, selected, 
     >
       {/* Image container */}
       <div className={`
-        relative overflow-hidden bg-gray-100
+        relative overflow-hidden bg-gray-100 flex items-center justify-center
         ${compact ? 'w-20 h-20 rounded-md' : 'w-full aspect-[3/4] rounded-lg'}
         ${selected ? 'ring-2 ring-brand-black ring-offset-2' : ''}
       `}>
-        <img 
-          src={option.image} 
-          alt={option.label} 
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-        />
+        {option.image && !imgError ? (
+          <img 
+            src={option.image} 
+            alt={option.label} 
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center text-gray-300">
+             <span className="material-icons text-3xl mb-1">checkroom</span>
+             <span className="text-[10px] uppercase font-bold tracking-wider">No Image</span>
+          </div>
+        )}
+        
         {selected && !compact && (
           <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
             <span className="bg-white/90 text-brand-black px-3 py-1 text-xs font-bold uppercase tracking-widest shadow-sm">Selected</span>

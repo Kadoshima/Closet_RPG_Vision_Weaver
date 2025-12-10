@@ -24,6 +24,7 @@ const App: React.FC = () => {
 
   // Visual Search
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [visualSearchInitialImage, setVisualSearchInitialImage] = useState<string | null>(null);
   
   // Generation
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
@@ -48,6 +49,11 @@ const App: React.FC = () => {
     setSelection(prev => ({ ...prev, [key]: value }));
     setCurrentStep(nextStep);
     scrollToBottom();
+  };
+
+  const handleVisualSearch = (image?: string) => {
+    setVisualSearchInitialImage(image || null);
+    setIsSearchOpen(true);
   };
 
   const startGeneration = async () => {
@@ -145,18 +151,18 @@ const App: React.FC = () => {
            <div className="h-6 w-px bg-gray-200 mx-2"></div>
 
            <button 
-                onClick={() => setIsSearchOpen(true)}
+                onClick={() => handleVisualSearch()}
                 className="text-brand-black hover:text-gray-600 transition-colors p-2 rounded-full hover:bg-gray-100"
                 title="Visual Search"
             >
-                <span className="material-icons">center_focus_strong</span>
+                <span className="material-icons">photo_camera</span>
             </button>
            
            <button 
                 onClick={() => setIsClosetOpen(true)}
                 className="bg-brand-black text-white px-4 py-2 rounded-full text-sm hover:bg-gray-800 transition-all flex items-center gap-2"
             >
-                <span className="material-icons text-base">wardrobe</span>
+                <span className="material-icons text-base">checkroom</span>
                 <span className="hidden sm:inline">Wardrobe</span>
             </button>
         </div>
@@ -178,7 +184,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-white text-brand-black pb-32 pt-16">
-      <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
       {renderHeader()}
       
       <ClosetSidebar 
@@ -190,7 +195,11 @@ const App: React.FC = () => {
 
       <VisualSearchModal 
         isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
+        onClose={() => {
+            setIsSearchOpen(false);
+            setVisualSearchInitialImage(null);
+        }}
+        initialImage={visualSearchInitialImage}
       />
 
       <div className="container mx-auto max-w-6xl">
@@ -400,14 +409,13 @@ const App: React.FC = () => {
 
                  {/* Actions */}
                  <div className="space-y-4">
-                    <a 
-                        href={`https://www.google.com/search?q=${encodeURIComponent(selectedProduct.info.name + ' Uniqlo H&M Zara')}&tbm=shop`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block w-full py-4 bg-brand-black text-white text-center font-medium rounded hover:bg-gray-800 transition-colors shadow-lg"
+                    <button 
+                        onClick={() => handleVisualSearch(selectedProduct.imageUrl)}
+                        className="block w-full py-4 bg-brand-black text-white text-center font-medium rounded hover:bg-gray-800 transition-colors shadow-lg flex items-center justify-center gap-2"
                     >
-                        Find Similar on Uniqlo / H&M
-                    </a>
+                         <span className="material-icons text-base">shopping_search</span>
+                         Find Similar Items Online
+                    </button>
                     <button className="block w-full py-4 bg-white border border-brand-black text-brand-black text-center font-medium rounded hover:bg-gray-50 transition-colors">
                         Save to Collection
                     </button>
