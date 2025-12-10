@@ -1,25 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   FlowStep, SelectionState, CardOption, GeneratedItem, ClosetItem, GenerationStatus,
-  RPGStats
+  ProductSpecs
 } from './types';
 import { 
-  GENDER_OPTIONS, CATEGORY_OPTIONS, SUB_CATEGORY_OPTIONS, 
+  TARGET_OPTIONS, CATEGORY_OPTIONS, SUB_CATEGORY_OPTIONS, 
   STYLE_PRESETS, MOOD_OPTIONS 
 } from './constants';
-import { RPGCard } from './components/RPGCard';
+import { SelectionCard } from './components/SelectionCard';
 import { ClosetSidebar } from './components/ClosetSidebar';
 import { VoiceInput } from './components/VoiceInput';
-import { generateItemImage, generateLoreAndStats, generateFromVoice } from './services/geminiService';
+import { VisualSearchModal } from './components/VisualSearchModal';
+import { generateItemImage, generateProductDetails, generateFromVoice } from './services/geminiService';
 
 const App: React.FC = () => {
   // --- State ---
   const [selection, setSelection] = useState<SelectionState>({});
-  const [currentStep, setCurrentStep] = useState<FlowStep>(FlowStep.GENDER_SELECT);
+  const [currentStep, setCurrentStep] = useState<FlowStep>(FlowStep.TARGET_SELECT);
   
   // Closet
   const [isClosetOpen, setIsClosetOpen] = useState(false);
   const [closetItems, setClosetItems] = useState<ClosetItem[]>([]);
+
+  // Visual Search
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   
   // Generation
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
@@ -52,23 +56,21 @@ const App: React.FC = () => {
     scrollToBottom();
 
     const basePrompt = `
-      ${selection.gender?.label} ${selection.stylePreset?.label} ${selection.mood?.label} 
+      ${selection.target?.label} ${selection.stylePreset?.label} ${selection.mood?.label} 
       ${selection.subCategory?.label || selection.category?.label}.
-      Design style: ${selection.stylePreset?.description}.
-      Atmosphere: ${selection.mood?.description}.
-      High fantasy RPG item card art style but photorealistic texture.
+      Style: ${selection.stylePreset?.description}.
+      Context: ${selection.mood?.description}.
+      Design concept: Contemporary fashion, high quality material.
     `;
 
     // Generate 4 variations
     const promises = Array(4).fill(0).map(async (_, i) => {
-      // Small variation in seed/prompt if possible, but for now just same prompt 
-      // relying on model temperature
       const imageUrl = await generateItemImage(`${basePrompt} variation ${i+1}`);
       const closetContext = closetItems.length > 0 
         ? `${closetItems[0].analysis.color} ${closetItems[0].analysis.style} ${closetItems[0].analysis.material} item`
         : undefined;
 
-      const { stats, lore, compatibility } = await generateLoreAndStats(
+      const { specs, info, matchScore } = await generateProductDetails(
         `${selection.subCategory?.label} ${selection.stylePreset?.label}`,
         closetContext
       );
@@ -76,9 +78,9 @@ const App: React.FC = () => {
       return {
         id: `gen-${Date.now()}-${i}`,
         imageUrl,
-        stats,
-        lore,
-        compatibilityScore: compatibility
+        specs,
+        info,
+        matchScore
       } as GeneratedItem;
     });
 
@@ -97,18 +99,18 @@ const App: React.FC = () => {
     if (!selectedProduct) return;
     setGenerationStatus('generating');
     
-    const context = `A ${selection.gender?.label} ${selection.subCategory?.label}, style: ${selection.stylePreset?.label}`;
+    const context = `A ${selection.target?.label} ${selection.subCategory?.label}, style: ${selection.stylePreset?.label}`;
     const { modification } = await generateFromVoice(audioBase64, context);
     
     setRefinementPrompt(modification);
     
     // Regenerate image based on refinement
-    const newImage = await generateItemImage(`${context}. Modification: ${modification}. Maintain consistency with previous design but apply change.`);
+    const newImage = await generateItemImage(`${context}. Modification: ${modification}. Apply subtle design changes while keeping the core identity.`);
     
     setSelectedProduct(prev => prev ? {
         ...prev,
         imageUrl: newImage,
-        lore: { ...prev.lore, flavorText: `Reforged with the essence of "${modification}". ${prev.lore.flavorText}` }
+        info: { ...prev.info, stylingTips: `Updated with: "${modification}". ${prev.info.stylingTips}` }
     } : null);
     
     setGenerationStatus('complete');
@@ -116,55 +118,69 @@ const App: React.FC = () => {
 
   // --- Render Helpers ---
 
-  const renderProgress = () => {
-    const steps = [
-      { key: 'gender', label: selection.gender?.label, active: true },
-      { key: 'category', label: selection.category?.label, active: !!selection.gender },
-      { key: 'subCategory', label: selection.subCategory?.label, active: !!selection.category },
-      { key: 'style', label: selection.stylePreset?.label, active: !!selection.subCategory },
-      { key: 'mood', label: selection.mood?.label, active: !!selection.stylePreset },
-    ];
+  const renderHeader = () => (
+    <header className="fixed top-0 left-0 w-full z-30 bg-white/80 backdrop-blur-md border-b border-gray-100 py-4">
+      <div className="container mx-auto max-w-6xl px-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-serif font-bold text-brand-black tracking-tight">VISION WEAVER</h1>
+          <span className="text-xs bg-gray-100 px-2 py-0.5 rounded text-brand-gray">STUDIO</span>
+        </div>
+        <div className="flex items-center gap-4">
+           {/* Steps indicator */}
+           <div className="hidden md:flex gap-1 text-xs font-medium text-gray-400">
+              <span className={selection.target ? 'text-brand-black' : ''}>Target</span>
+              <span>/</span>
+              <span className={selection.category ? 'text-brand-black' : ''}>Category</span>
+              <span>/</span>
+              <span className={selection.stylePreset ? 'text-brand-black' : ''}>Style</span>
+           </div>
+           
+           <button 
+             className="text-xs underline text-brand-gray hover:text-brand-black transition-colors"
+             onClick={() => window.location.reload()}
+           >
+             Start Over
+           </button>
+           
+           <div className="h-6 w-px bg-gray-200 mx-2"></div>
 
-    return (
-      <div className="fixed top-0 left-0 w-full z-30 bg-rpg-dark/90 backdrop-blur-md border-b border-slate-700 p-4 shadow-lg flex gap-2 overflow-x-auto scrollbar-hide">
-        {steps.map((s, i) => (
-           s.label ? (
-             <div key={i} className="flex items-center">
-                <span className="px-3 py-1 bg-rpg-panel border border-rpg-gold text-rpg-gold rounded-full text-xs font-mono uppercase whitespace-nowrap">
-                  {s.label}
-                </span>
-                {i < steps.length - 1 && <span className="mx-2 text-slate-600">›</span>}
-             </div>
-           ) : null
-        ))}
-        <button 
-          className="ml-auto bg-rpg-accent text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider hover:bg-amber-500 transition-colors"
-          onClick={() => window.location.reload()}
-        >
-          Reset Quest
-        </button>
+           <button 
+                onClick={() => setIsSearchOpen(true)}
+                className="text-brand-black hover:text-gray-600 transition-colors p-2 rounded-full hover:bg-gray-100"
+                title="Visual Search"
+            >
+                <span className="material-icons">center_focus_strong</span>
+            </button>
+           
+           <button 
+                onClick={() => setIsClosetOpen(true)}
+                className="bg-brand-black text-white px-4 py-2 rounded-full text-sm hover:bg-gray-800 transition-all flex items-center gap-2"
+            >
+                <span className="material-icons text-base">wardrobe</span>
+                <span className="hidden sm:inline">Wardrobe</span>
+            </button>
+        </div>
       </div>
-    );
-  };
+    </header>
+  );
 
   const renderSection = (title: string, subtitle: string, children: React.ReactNode) => (
-    <div className="min-h-[50vh] py-12 flex flex-col items-center animate-fade-in px-4">
-      <div className="mb-8 text-center">
-        <h2 className="text-3xl font-serif text-white mb-2 tracking-wide drop-shadow-lg">{title}</h2>
-        <p className="text-slate-400 font-mono text-sm">{subtitle}</p>
-        <div className="h-1 w-24 bg-rpg-accent mx-auto mt-4 rounded-full" />
+    <div className="min-h-[60vh] py-20 flex flex-col items-center animate-fade-in px-4 border-b border-gray-50 last:border-0">
+      <div className="mb-12 text-center max-w-lg">
+        <h2 className="text-4xl font-serif text-brand-black mb-3">{title}</h2>
+        <p className="text-brand-gray font-light text-lg">{subtitle}</p>
       </div>
-      <div className="w-full max-w-4xl">
+      <div className="w-full max-w-5xl">
         {children}
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-rpg-dark text-slate-200 pb-32 pt-20">
-      {renderProgress()}
+    <div className="min-h-screen bg-white text-brand-black pb-32 pt-16">
+      <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+      {renderHeader()}
       
-      {/* Sidebar */}
       <ClosetSidebar 
         isOpen={isClosetOpen} 
         onToggle={() => setIsClosetOpen(!isClosetOpen)}
@@ -172,27 +188,32 @@ const App: React.FC = () => {
         onItemAdd={(item) => setClosetItems([...closetItems, item])}
       />
 
-      <div className="container mx-auto max-w-5xl">
+      <VisualSearchModal 
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+      />
+
+      <div className="container mx-auto max-w-6xl">
         
-        {/* Step 1: Gender */}
-        {renderSection("Identify Target", "Who is this equipment for?", (
-          <div className="grid grid-cols-3 gap-6">
-            {GENDER_OPTIONS.map(opt => (
-              <RPGCard 
+        {/* Step 1: Target */}
+        {renderSection("Design Target", "Who are we designing for today?", (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {TARGET_OPTIONS.map(opt => (
+              <SelectionCard 
                 key={opt.id} 
                 option={opt} 
-                selected={selection.gender?.id === opt.id}
-                onClick={() => handleSelect('gender', opt, FlowStep.CATEGORY_SELECT)}
+                selected={selection.target?.id === opt.id}
+                onClick={() => handleSelect('target', opt, FlowStep.CATEGORY_SELECT)}
               />
             ))}
           </div>
         ))}
 
         {/* Step 2: Category */}
-        {currentStep !== FlowStep.GENDER_SELECT && renderSection("Select Class", "What type of gear do you need?", (
-           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {currentStep !== FlowStep.TARGET_SELECT && renderSection("Category", "Select the type of apparel.", (
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
              {CATEGORY_OPTIONS.map(opt => (
-               <RPGCard 
+               <SelectionCard 
                  key={opt.id} 
                  option={opt} 
                  selected={selection.category?.id === opt.id}
@@ -203,10 +224,10 @@ const App: React.FC = () => {
         ))}
 
         {/* Step 3: Sub Category */}
-        {(currentStep === FlowStep.SUB_CATEGORY_SELECT || selection.subCategory) && selection.category && renderSection("Refine Class", "Specific specialization", (
-           <div className="grid grid-cols-3 gap-4">
+        {(currentStep === FlowStep.SUB_CATEGORY_SELECT || selection.subCategory) && selection.category && renderSection("Specifics", `Refine your ${selection.category.label.toLowerCase()} choice.`, (
+           <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
              {SUB_CATEGORY_OPTIONS[selection.category.id]?.map(opt => (
-               <RPGCard 
+               <SelectionCard 
                  key={opt.id} 
                  option={opt} 
                  selected={selection.subCategory?.id === opt.id}
@@ -217,25 +238,24 @@ const App: React.FC = () => {
         ))}
 
         {/* Step 4: Style */}
-        {(currentStep === FlowStep.STYLE_PRESET || selection.stylePreset) && renderSection("Choose Archetype", "Define the aesthetic form", (
-           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {(currentStep === FlowStep.STYLE_PRESET || selection.stylePreset) && renderSection("Aesthetic", "Define the visual language.", (
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
              {STYLE_PRESETS.map(opt => (
-               <RPGCard 
+               <SelectionCard 
                  key={opt.id} 
                  option={opt} 
                  selected={selection.stylePreset?.id === opt.id}
                  onClick={() => handleSelect('stylePreset', opt, FlowStep.MOOD_SELECT)}
-                 compact
                />
              ))}
            </div>
         ))}
 
         {/* Step 5: Mood */}
-        {(currentStep === FlowStep.MOOD_SELECT || selection.mood) && renderSection("Infuse Essence", "Select the atmospheric vibe", (
-           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {(currentStep === FlowStep.MOOD_SELECT || selection.mood) && renderSection("Context", "Where will this be worn?", (
+           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
              {MOOD_OPTIONS.map(opt => (
-               <RPGCard 
+               <SelectionCard 
                  key={opt.id} 
                  option={opt} 
                  selected={selection.mood?.id === opt.id}
@@ -250,35 +270,42 @@ const App: React.FC = () => {
 
         {/* Step 6: Generation */}
         {(currentStep === FlowStep.GENERATION || currentStep === FlowStep.DETAIL) && (
-          <div className="min-h-screen py-12 flex flex-col items-center">
-            <h2 className="text-3xl font-serif text-rpg-magic mb-8 animate-pulse-slow">
-              {generationStatus === 'generating' ? 'Forging Equipment...' : 'Forge Complete'}
-            </h2>
+          <div className="min-h-screen py-16 flex flex-col items-center">
+             <div className="text-center mb-12">
+                <h2 className="text-3xl font-serif mb-2">
+                    {generationStatus === 'generating' ? 'Creating Designs...' : 'Collection Ready'}
+                </h2>
+                <p className="text-brand-gray">AI is synthesizing trends and materials.</p>
+             </div>
             
             {generationStatus === 'generating' && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full px-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full px-4 max-w-6xl">
                 {[1,2,3,4].map(i => (
-                  <div key={i} className="aspect-[3/4] bg-slate-800 animate-pulse rounded border border-slate-600"></div>
+                  <div key={i} className="aspect-[3/4] bg-gray-100 animate-pulse rounded-lg"></div>
                 ))}
               </div>
             )}
 
             {generationStatus === 'complete' && !selectedProduct && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full px-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full px-4 max-w-6xl">
                 {generatedOptions.map((item) => (
                   <div key={item.id} className="group relative">
                     <div 
                       onClick={() => handleProductSelect(item)}
-                      className="cursor-pointer bg-slate-900 border-2 border-slate-600 hover:border-rpg-magic transition-all rounded overflow-hidden relative"
+                      className="cursor-pointer bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300"
                     >
-                      <img src={item.imageUrl} alt="Generated" className="w-full aspect-[3/4] object-cover" />
-                      
-                      {/* Stats Overlay */}
-                      <div className="absolute bottom-0 left-0 w-full bg-black/80 p-2 transform translate-y-full group-hover:translate-y-0 transition-transform">
-                        <div className="text-xs font-mono text-rpg-gold mb-1">{item.lore.title}</div>
-                        {item.compatibilityScore !== undefined && (
-                          <div className="text-xs text-green-400">Sync: {item.compatibilityScore}%</div>
-                        )}
+                      <div className="aspect-[3/4] overflow-hidden">
+                          <img src={item.imageUrl} alt="Generated" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      </div>
+                      <div className="p-4">
+                          <h3 className="font-sans font-medium text-brand-black truncate">{item.info.name}</h3>
+                          {item.matchScore !== undefined && (
+                            <div className="mt-2 flex items-center gap-2">
+                                <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                                    {item.matchScore}% Match
+                                </span>
+                            </div>
+                          )}
                       </div>
                     </div>
                   </div>
@@ -290,89 +317,99 @@ const App: React.FC = () => {
 
         {/* Step 7: Detail View */}
         {currentStep === FlowStep.DETAIL && selectedProduct && (
-          <div className="fixed inset-0 z-50 bg-rpg-dark/95 overflow-y-auto">
-             <div className="max-w-6xl mx-auto p-4 md:p-12 flex flex-col md:flex-row gap-8">
+          <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
+             <div className="max-w-7xl mx-auto p-4 md:p-12 flex flex-col lg:flex-row gap-16 animate-fade-in">
                
-               {/* Left: Image & Vibe */}
-               <div className="flex-1">
-                 <button 
-                    onClick={() => setCurrentStep(FlowStep.GENERATION)}
-                    className="mb-4 text-slate-400 hover:text-white flex items-center gap-2"
-                 >
-                   ← Back to Forge
-                 </button>
-                 <div className="border-4 border-double border-rpg-gold p-1 bg-black shadow-2xl relative">
-                    <img src={selectedProduct.imageUrl} className="w-full h-auto" />
-                    {refinementPrompt && (
-                        <div className="absolute top-2 left-2 bg-rpg-magic/80 text-white text-xs px-2 py-1 rounded">
-                            Mod: {refinementPrompt}
-                        </div>
-                    )}
-                 </div>
+               {/* Close / Back */}
+               <button 
+                  onClick={() => setCurrentStep(FlowStep.GENERATION)}
+                  className="absolute top-6 left-6 z-50 bg-white/90 p-2 rounded-full shadow-lg hover:bg-gray-100"
+               >
+                 <span className="material-icons">arrow_back</span>
+               </button>
 
-                 {/* Vibe Sound Search */}
-                 <div className="mt-8 bg-slate-800/50 p-6 rounded-lg border border-slate-600 text-center">
-                    <h3 className="text-rpg-gold font-serif text-xl mb-2">Vibe Refinement</h3>
-                    <p className="text-sm text-slate-400 mb-4">Speak an onomatopoeia or instruction to reshape the item.</p>
+               {/* Left: Images */}
+               <div className="flex-1 lg:max-w-2xl">
+                 <div className="bg-gray-50 rounded-xl overflow-hidden shadow-sm">
+                    <img src={selectedProduct.imageUrl} className="w-full h-auto object-cover" />
+                 </div>
+                 
+                 {/* Voice Refinement */}
+                 <div className="mt-8 flex flex-col items-center p-6 bg-gray-50 rounded-xl">
+                    <h4 className="font-serif text-lg mb-2">AI Designer Assistant</h4>
+                    <p className="text-sm text-brand-gray text-center mb-4 max-w-xs">
+                        "Too dark", "Make it cleaner", "More casual". <br/>Speak to refine the design instantly.
+                    </p>
                     <VoiceInput 
                         isProcessing={generationStatus === 'generating'}
                         onAudioRecorded={handleVoiceRefinement}
                     />
+                    {refinementPrompt && (
+                        <p className="text-xs text-brand-black mt-2 bg-white px-3 py-1 rounded border border-gray-200">
+                            Last edit: "{refinementPrompt}"
+                        </p>
+                    )}
                  </div>
                </div>
 
-               {/* Right: Lore & Stats */}
-               <div className="flex-1 space-y-8">
-                 <div>
-                   <h1 className="text-4xl font-serif font-bold text-white mb-2">{selectedProduct.lore.title}</h1>
-                   <div className="flex items-center gap-2 mb-4">
-                     <span className="px-2 py-0.5 bg-slate-700 text-slate-300 text-xs uppercase tracking-widest rounded">
-                        Element: {selectedProduct.lore.element}
-                     </span>
-                     {selectedProduct.compatibilityScore !== undefined && (
-                        <span className={`px-2 py-0.5 text-black text-xs font-bold uppercase tracking-widest rounded ${
-                            selectedProduct.compatibilityScore > 70 ? 'bg-green-500' : 'bg-yellow-500'
-                        }`}>
-                            Closet Sync: {selectedProduct.compatibilityScore}%
-                        </span>
-                     )}
-                   </div>
-                   <p className="text-lg text-slate-300 italic font-serif leading-relaxed border-l-4 border-rpg-accent pl-4">
-                     "{selectedProduct.lore.flavorText}"
-                   </p>
-                   <p className="mt-4 text-slate-400 text-sm">
-                     {selectedProduct.lore.description}
-                   </p>
+               {/* Right: Info */}
+               <div className="flex-1 pt-4">
+                 <div className="mb-8 pb-8 border-b border-gray-100">
+                    <span className="text-sm text-brand-gray uppercase tracking-widest">{selectedProduct.info.materials}</span>
+                    <h1 className="text-4xl font-serif font-bold text-brand-black mt-2 mb-4">{selectedProduct.info.name}</h1>
+                    <p className="text-lg text-gray-600 leading-relaxed font-light">
+                        {selectedProduct.info.description}
+                    </p>
+                    {selectedProduct.matchScore !== undefined && (
+                        <div className="mt-6 inline-flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
+                             <span className="material-icons text-brand-black">checkroom</span>
+                             <span className="text-sm font-medium">Matches your wardrobe by <span className="text-brand-black font-bold">{selectedProduct.matchScore}%</span></span>
+                        </div>
+                    )}
                  </div>
 
-                 {/* Stats Radar/Bars */}
-                 <div className="bg-slate-800 p-6 rounded border border-slate-700">
-                    <h3 className="text-rpg-gold font-mono uppercase text-sm mb-4 border-b border-slate-600 pb-2">Item Statistics</h3>
-                    <div className="space-y-3">
-                        {Object.entries(selectedProduct.stats).map(([key, val]) => (
-                            <div key={key} className="flex items-center gap-4">
-                                <span className="w-24 text-right text-xs uppercase font-bold text-slate-400">{key}</span>
-                                <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-                                    <div 
-                                        className="h-full bg-gradient-to-r from-rpg-accent to-rpg-gold" 
-                                        style={{ width: `${val}%` }}
-                                    />
-                                </div>
-                                <span className="w-8 text-xs font-mono text-white">{val}</span>
-                            </div>
-                        ))}
-                    </div>
+                 <div className="grid grid-cols-2 gap-x-12 gap-y-8 mb-12">
+                     <div>
+                         <h3 className="font-bold text-sm uppercase text-brand-black mb-3">Styling Tips</h3>
+                         <p className="text-sm text-gray-600 leading-relaxed">{selectedProduct.info.stylingTips}</p>
+                     </div>
+                     <div>
+                         <h3 className="font-bold text-sm uppercase text-brand-black mb-3">Product Specs</h3>
+                         <ul className="space-y-2 text-sm text-gray-600">
+                             <li className="flex justify-between">
+                                 <span>Versatility</span>
+                                 <div className="w-24 h-1.5 bg-gray-200 rounded-full mt-2">
+                                     <div className="h-full bg-brand-black rounded-full" style={{width: `${selectedProduct.specs.versatility}%`}}></div>
+                                 </div>
+                             </li>
+                             <li className="flex justify-between">
+                                 <span>Comfort</span>
+                                 <div className="w-24 h-1.5 bg-gray-200 rounded-full mt-2">
+                                     <div className="h-full bg-brand-black rounded-full" style={{width: `${selectedProduct.specs.comfort}%`}}></div>
+                                 </div>
+                             </li>
+                             <li className="flex justify-between">
+                                 <span>Trend</span>
+                                 <div className="w-24 h-1.5 bg-gray-200 rounded-full mt-2">
+                                     <div className="h-full bg-brand-black rounded-full" style={{width: `${selectedProduct.specs.trend}%`}}></div>
+                                 </div>
+                             </li>
+                         </ul>
+                     </div>
                  </div>
 
-                 {/* Purchase / Order Actions */}
-                 <div className="grid grid-cols-2 gap-4 pt-4">
-                    <button className="py-4 bg-slate-700 hover:bg-slate-600 border border-slate-500 text-white font-serif text-lg rounded transition-colors flex flex-col items-center">
-                        <span>Find Similar</span>
-                        <span className="text-xs text-slate-400 font-sans">Amazon / EC</span>
-                    </button>
-                    <button className="py-4 bg-rpg-gold hover:bg-amber-400 text-black font-serif font-bold text-lg rounded shadow-[0_0_20px_rgba(251,191,36,0.3)] transition-all flex flex-col items-center">
-                        <span>Craft Custom</span>
-                        <span className="text-xs font-sans opacity-70">Generate 3D & Specs</span>
+                 {/* Actions */}
+                 <div className="space-y-4">
+                    <a 
+                        href={`https://www.google.com/search?q=${encodeURIComponent(selectedProduct.info.name + ' Uniqlo H&M Zara')}&tbm=shop`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block w-full py-4 bg-brand-black text-white text-center font-medium rounded hover:bg-gray-800 transition-colors shadow-lg"
+                    >
+                        Find Similar on Uniqlo / H&M
+                    </a>
+                    <button className="block w-full py-4 bg-white border border-brand-black text-brand-black text-center font-medium rounded hover:bg-gray-50 transition-colors">
+                        Save to Collection
                     </button>
                  </div>
 

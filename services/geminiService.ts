@@ -1,22 +1,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { GeneratedItem, RPGStats, ItemLore, ClosetItem } from '../types';
+import { GeneratedItem, ProductSpecs, ProductInfo, ClosetItem, SearchResult } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-export const generateLoreAndStats = async (
+export const generateProductDetails = async (
   features: string,
   closetContext?: string
-): Promise<{ stats: RPGStats; lore: ItemLore; compatibility?: number }> => {
+): Promise<{ specs: ProductSpecs; info: ProductInfo; matchScore?: number }> => {
   try {
     const prompt = `
-      You are an RPG Item Master for a fashion application.
-      Create RPG statistics and lore for a fashion item with these features: "${features}".
-      ${closetContext ? `Also analyze compatibility with this closet item: ${closetContext}. Give a score 0-100.` : ''}
+      You are a Senior Fashion Designer and Stylist for a modern apparel brand like Uniqlo, H&M, or COS.
+      Design a product with these features: "${features}".
+      ${closetContext ? `Also analyze stylistic compatibility with this item from the user's wardrobe: ${closetContext}. Give a score 0-100.` : ''}
       
       Return JSON with:
-      - stats: durability, storage, charisma, weight, versatility (all 0-100)
-      - lore: title (creative name), description (professional), flavorText (RPG style story), element (one of Fire, Water, Earth, Air, Void, Leather, Steel)
-      ${closetContext ? '- compatibility: 0-100' : ''}
+      - specs: comfort, versatility, trend, warmth, price_tier (all 0-100 integers)
+      - info: 
+          name (Catchy, modern product name like "Cotton Oversized Tee"), 
+          description (Professional e-commerce description, max 2 sentences), 
+          stylingTips (How to wear it, e.g., "Pair with wide-fit jeans."), 
+          materials (e.g., "100% Organic Cotton")
+      ${closetContext ? '- matchScore: 0-100' : ''}
     `;
 
     const response = await ai.models.generateContent({
@@ -27,26 +31,26 @@ export const generateLoreAndStats = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            stats: {
+            specs: {
               type: Type.OBJECT,
               properties: {
-                durability: { type: Type.INTEGER },
-                storage: { type: Type.INTEGER },
-                charisma: { type: Type.INTEGER },
-                weight: { type: Type.INTEGER },
+                comfort: { type: Type.INTEGER },
                 versatility: { type: Type.INTEGER },
+                trend: { type: Type.INTEGER },
+                warmth: { type: Type.INTEGER },
+                price_tier: { type: Type.INTEGER },
               }
             },
-            lore: {
+            info: {
               type: Type.OBJECT,
               properties: {
-                title: { type: Type.STRING },
+                name: { type: Type.STRING },
                 description: { type: Type.STRING },
-                flavorText: { type: Type.STRING },
-                element: { type: Type.STRING },
+                stylingTips: { type: Type.STRING },
+                materials: { type: Type.STRING },
               }
             },
-            compatibility: { type: Type.INTEGER }
+            matchScore: { type: Type.INTEGER }
           }
         }
       }
@@ -57,27 +61,25 @@ export const generateLoreAndStats = async (
     return JSON.parse(text);
   } catch (error) {
     console.error("Lore generation failed:", error);
-    // Fallback data
     return {
-      stats: { durability: 50, storage: 50, charisma: 50, weight: 50, versatility: 50 },
-      lore: { title: "Unknown Artifact", description: "An item shrouded in mystery.", flavorText: "The stats are unreadable...", element: "Void" },
-      compatibility: 50
+      specs: { comfort: 80, versatility: 80, trend: 50, warmth: 50, price_tier: 50 },
+      info: { name: "Classic Staple", description: "A timeless piece for any wardrobe.", stylingTips: "Versatile enough for any occasion.", materials: "Cotton Blend" },
+      matchScore: 50
     };
   }
 };
 
 export const generateItemImage = async (prompt: string, aspectRatio: string = "1:1"): Promise<string> => {
   try {
-    // Switch to gemini-2.5-flash-image for better availability/permissions
+    // Generate clean e-commerce style image
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
-        parts: [{ text: `A high quality, photorealistic fashion product shot of: ${prompt}. Clean studio lighting, white background.` }],
+        parts: [{ text: `Professional studio fashion photography of: ${prompt}. Clean white background, soft studio lighting, catalogue style, H&M or Uniqlo aesthetic. High resolution.` }],
       },
       config: {
         imageConfig: {
             aspectRatio: aspectRatio as any, 
-            // imageSize is not supported in gemini-2.5-flash-image
         }
       }
     });
@@ -90,7 +92,7 @@ export const generateItemImage = async (prompt: string, aspectRatio: string = "1
     throw new Error("No image generated");
   } catch (error) {
     console.error("Image generation failed", error);
-    return `https://picsum.photos/seed/${Math.random()}/512/512`;
+    return `https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=500&q=80`;
   }
 };
 
@@ -101,7 +103,7 @@ export const analyzeClosetImage = async (base64Image: string): Promise<ClosetIte
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Analyze this fashion item. Return JSON with 'color', 'style', 'season', and 'material'." }
+          { text: "Analyze this clothing item for a fashion app. Return JSON with 'color', 'style' (e.g. casual, formal), 'season', and 'material'." }
         ]
       },
       config: {
@@ -127,7 +129,7 @@ export const generateFromVoice = async (audioBase64: string, currentContext: str
       contents: {
         parts: [
           { inlineData: { mimeType: 'audio/wav', data: audioBase64 } },
-          { text: `The user is describing how to modify this fashion item: "${currentContext}". Interpret the onomatopoeia or description. Return a short text description of the visual change needed.` }
+          { text: `The user is describing how to modify this fashion design: "${currentContext}". Interpret the feedback (including abstract words like 'softer', 'bolder'). Return a short text description of the design change needed.` }
         ]
       }
     });
@@ -137,3 +139,49 @@ export const generateFromVoice = async (audioBase64: string, currentContext: str
     return { modification: "Error processing voice" };
   }
 }
+
+export const searchItemByImage = async (base64Image: string): Promise<SearchResult> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
+          { text: "Identify this fashion item in detail (brand estimate if possible, style, material). Search for this exact item or very similar items available for sale online. Provide a short description and a list of links." }
+        ]
+      },
+      config: {
+        tools: [{ googleSearch: {} }]
+      }
+    });
+
+    const description = response.text || "No description found.";
+    
+    // Extract grounding chunks for links
+    // The path is response.candidates[0].groundingMetadata.groundingChunks
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const links: { title: string; uri: string }[] = [];
+
+    chunks.forEach(chunk => {
+      if (chunk.web) {
+        links.push({
+          title: chunk.web.title || "Web Result",
+          uri: chunk.web.uri || "#"
+        });
+      }
+    });
+
+    // Remove duplicates
+    const uniqueLinks = links.filter((link, index, self) => 
+      index === self.findIndex((l) => l.uri === link.uri)
+    );
+
+    return { description, links: uniqueLinks };
+  } catch (error) {
+    console.error("Visual search failed:", error);
+    return { 
+      description: "Could not perform visual search at this time.", 
+      links: [] 
+    };
+  }
+};

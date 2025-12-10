@@ -1,6 +1,6 @@
 {
-  "name": "Closet RPG: VisionWeaver",
-  "description": "An RPG-themed generative fashion design studio. Create equipment for your real life using AI, sync with your closet, and generate item lore and stats.",
+  "name": "VisionWeaver Studio",
+  "description": "A modern AI fashion design studio. Create custom apparel, analyze wardrobe compatibility, and find similar items from popular brands.",
   "requestFramePermissions": [
     "microphone",
     "camera"

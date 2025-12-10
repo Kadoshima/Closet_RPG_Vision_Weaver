@@ -1,11 +1,10 @@
 export enum FlowStep {
-  GENDER_SELECT = 'GENDER_SELECT',
+  TARGET_SELECT = 'TARGET_SELECT',
   CATEGORY_SELECT = 'CATEGORY_SELECT',
   SUB_CATEGORY_SELECT = 'SUB_CATEGORY_SELECT',
   STYLE_PRESET = 'STYLE_PRESET',
   MOOD_SELECT = 'MOOD_SELECT',
   GENERATION = 'GENERATION',
-  REFINEMENT = 'REFINEMENT',
   DETAIL = 'DETAIL',
 }
 
@@ -14,38 +13,37 @@ export interface CardOption {
   label: string;
   image?: string;
   description?: string;
-  statsMod?: Partial<RPGStats>;
 }
 
 export interface SelectionState {
-  gender?: CardOption;
+  target?: CardOption;
   category?: CardOption;
   subCategory?: CardOption;
   stylePreset?: CardOption;
   mood?: CardOption;
 }
 
-export interface RPGStats {
-  durability: number; // S-E rank internally mapped to 1-100
-  storage: number;
-  charisma: number;
-  weight: number; // Lower is better or higher is heavier? Let's say higher = Heavier duty
-  versatility: number;
+export interface ProductSpecs {
+  comfort: number;     // 快適さ
+  versatility: number; // 着回し力
+  trend: number;       // トレンド感
+  warmth: number;      // 機能性/暖かさ (context dependent, but good general metric)
+  price_tier: number;  // 1-100 implying affordability to luxury
 }
 
-export interface ItemLore {
-  title: string;
+export interface ProductInfo {
+  name: string;
   description: string;
-  flavorText: string;
-  element: 'Fire' | 'Water' | 'Earth' | 'Air' | 'Void' | 'Leather' | 'Steel';
+  stylingTips: string;
+  materials: string; // Cotton, Wool, etc.
 }
 
 export interface GeneratedItem {
   id: string;
   imageUrl: string;
-  lore: ItemLore;
-  stats: RPGStats;
-  compatibilityScore?: number; // With closet
+  info: ProductInfo;
+  specs: ProductSpecs;
+  matchScore?: number; // Closet compatibility
 }
 
 export interface ClosetItem {
@@ -57,6 +55,14 @@ export interface ClosetItem {
     season: string;
     material: string;
   };
+}
+
+export interface SearchResult {
+  description: string;
+  links: {
+    title: string;
+    uri: string;
+  }[];
 }
 
 export type GenerationStatus = 'idle' | 'generating' | 'complete' | 'error';
