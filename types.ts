@@ -2,8 +2,7 @@
 export enum FlowStep {
   TARGET_SELECT = 'TARGET_SELECT',
   CATEGORY_SELECT = 'CATEGORY_SELECT',
-  SUB_CATEGORY_SELECT = 'SUB_CATEGORY_SELECT',
-  STYLE_PRESET = 'STYLE_PRESET',
+  STYLE_SELECT = 'STYLE_SELECT',
   MOOD_SELECT = 'MOOD_SELECT',
   GENERATION = 'GENERATION',
   DETAIL = 'DETAIL',
@@ -19,43 +18,30 @@ export interface CardOption {
 export interface SelectionState {
   target?: CardOption;
   category?: CardOption;
-  subCategory?: CardOption;
   stylePreset?: CardOption;
   mood?: CardOption;
 }
 
 export interface ProductSpecs {
-  comfort: number;     // 快適さ
-  versatility: number; // 着回し力
-  trend: number;       // トレンド感
-  warmth: number;      // 機能性/暖かさ (context dependent, but good general metric)
-  price_tier: number;  // 1-100 implying affordability to luxury
+  comfort: number;
+  versatility: number;
+  trend: number;
+  warmth: number;
+  price_tier: number;
 }
 
 export interface ProductInfo {
   name: string;
   description: string;
   stylingTips: string;
-  materials: string; // Cotton, Wool, etc.
+  materials: string;
 }
 
-export interface GeneratedItem {
+export interface GeneratedLook {
   id: string;
   imageUrl: string;
   info: ProductInfo;
   specs: ProductSpecs;
-  matchScore?: number; // Closet compatibility
-}
-
-export interface ClosetItem {
-  id: string;
-  imageUrl: string;
-  analysis: {
-    color: string;
-    style: string;
-    season: string;
-    material: string;
-  };
 }
 
 export interface SearchResult {
@@ -78,3 +64,16 @@ export interface BespokeQuote {
 }
 
 export type GenerationStatus = 'idle' | 'generating' | 'complete' | 'error';
+
+export interface ClosetAnalysis {
+  style: string;
+  color: string;
+  material: string;
+  season: string;
+}
+
+export interface ClosetItem {
+  id: string;
+  imageUrl: string;
+  analysis: ClosetAnalysis;
+}

@@ -1,40 +1,37 @@
 import React, { useState, useRef } from 'react';
 import { 
-  FlowStep, SelectionState, CardOption, GeneratedItem, ClosetItem, GenerationStatus,
-  ProductSpecs
+  FlowStep, SelectionState, CardOption, GeneratedLook, GenerationStatus
 } from './types';
 import { 
-  TARGET_OPTIONS, CATEGORY_OPTIONS, SUB_CATEGORY_OPTIONS, 
-  STYLE_PRESETS, MOOD_OPTIONS 
+  TARGET_OPTIONS, CATEGORY_OPTIONS, STYLE_PRESETS, MOOD_OPTIONS 
 } from './constants';
 import { SelectionCard } from './components/SelectionCard';
 import { ClosetSidebar } from './components/ClosetSidebar';
 import { VoiceInput } from './components/VoiceInput';
 import { VisualSearchModal } from './components/VisualSearchModal';
-import { generateItemImage, generateProductDetails, generateFromVoice } from './services/geminiService';
+import { generateFashionImage, generateLookDetails, generateFromVoice } from './services/geminiService';
 
 const App: React.FC = () => {
   // --- State ---
-  const [selection, setSelection] = useState<SelectionState>({});
   const [currentStep, setCurrentStep] = useState<FlowStep>(FlowStep.TARGET_SELECT);
+  const [selection, setSelection] = useState<SelectionState>({});
   
   // Closet
   const [isClosetOpen, setIsClosetOpen] = useState(false);
-  const [closetItems, setClosetItems] = useState<ClosetItem[]>([]);
+  // We can keep closetItems in a real app, simplified here
+  const [closetItems, setClosetItems] = useState<any[]>([]);
 
-  // Visual Search
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [visualSearchInitialImage, setVisualSearchInitialImage] = useState<string | null>(null);
-  
   // Generation
   const [generationStatus, setGenerationStatus] = useState<GenerationStatus>('idle');
-  const [generatedOptions, setGeneratedOptions] = useState<GeneratedItem[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<GeneratedItem | null>(null);
-  
-  // Refinement
+  const [generatedLooks, setGeneratedLooks] = useState<GeneratedLook[]>([]);
+  const [selectedLook, setSelectedLook] = useState<GeneratedLook | null>(null);
   const [refinementPrompt, setRefinementPrompt] = useState<string>('');
-  
-  // Refs for auto-scrolling
+
+  // Tools
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [visualSearchInitialImage, setVisualSearchInitialImage] = useState<string | null>(null);
+  const [visualSearchMode, setVisualSearchMode] = useState<'search' | 'bespoke'>('search');
+
   const endOfListRef = useRef<HTMLDivElement>(null);
 
   // --- Handlers ---
@@ -47,123 +44,145 @@ const App: React.FC = () => {
 
   const handleSelect = (key: keyof SelectionState, value: CardOption, nextStep: FlowStep) => {
     setSelection(prev => ({ ...prev, [key]: value }));
-    setCurrentStep(nextStep);
-    scrollToBottom();
+    
+    // Auto-advance if not the final trigger
+    if (nextStep !== FlowStep.GENERATION) {
+        setCurrentStep(nextStep);
+        scrollToBottom();
+    } else {
+        // Just update state, the button will trigger generation
+        setCurrentStep(FlowStep.MOOD_SELECT); 
+        scrollToBottom();
+    }
   };
 
-  const handleVisualSearch = (image?: string) => {
-    setVisualSearchInitialImage(image || null);
-    setIsSearchOpen(true);
+  const handleMoodSelect = (option: CardOption) => {
+      setSelection(prev => ({ ...prev, mood: option }));
+      startGeneration(option);
   };
 
-  const startGeneration = async () => {
+  const startGeneration = async (moodOption?: CardOption) => {
+    const finalMood = moodOption || selection.mood;
+    if (!selection.target || !selection.category || !selection.stylePreset || !finalMood) return;
+
     setCurrentStep(FlowStep.GENERATION);
     setGenerationStatus('generating');
     scrollToBottom();
 
-    const basePrompt = `
-      ${selection.target?.label} ${selection.stylePreset?.label} ${selection.mood?.label} 
-      ${selection.subCategory?.label || selection.category?.label}.
-      Style: ${selection.stylePreset?.description}.
-      Context: ${selection.mood?.description}.
-      Design concept: Contemporary fashion, high quality material.
-    `;
+    // Construct prompt for text-to-image
+    const target = selection.target.label;
+    const category = selection.category.label;
+    const style = selection.stylePreset.label;
+    const mood = finalMood.label;
+    
+    // Generate 3 variations
+    try {
+        const promises = Array(3).fill(0).map(async (_, i) => {
+            const variation = i === 0 ? "minimalist interpretation" : i === 1 ? "bold and textured" : "modern layered look";
+            
+            // Rephrase to prioritize the item description over the "atmosphere"
+            let itemDescription = `${target} ${category}`;
+            // Expand generic categories
+            if (category.toLowerCase() === 'bottoms') itemDescription = `${target} trousers, pants, or skirt`;
+            if (category.toLowerCase() === 'tops') itemDescription = `${target} top, shirt, or knitwear`;
+            if (category.toLowerCase() === 'outerwear') itemDescription = `${target} coat or jacket`;
 
-    // Generate 4 variations
-    const promises = Array(4).fill(0).map(async (_, i) => {
-      const imageUrl = await generateItemImage(`${basePrompt} variation ${i+1}`);
-      const closetContext = closetItems.length > 0 
-        ? `${closetItems[0].analysis.color} ${closetItems[0].analysis.style} ${closetItems[0].analysis.material} item`
-        : undefined;
+            const imagePrompt = `Full body fashion shot. A model wearing ${itemDescription} in ${style} style. The setting suggests ${mood}. ${variation}. Ensure the ${category} is clearly visible and is the main focus.`;
+            
+            const textContext = `${target} ${category}, ${style} style, ${mood} vibe. ${variation}.`;
 
-      const { specs, info, matchScore } = await generateProductDetails(
-        `${selection.subCategory?.label} ${selection.stylePreset?.label}`,
-        closetContext
-      );
+            const imageUrl = await generateFashionImage(imagePrompt);
+            const { specs, info } = await generateLookDetails(textContext);
+            
+            return {
+                id: `look-${Date.now()}-${i}`,
+                imageUrl,
+                specs,
+                info
+            } as GeneratedLook;
+        });
 
-      return {
-        id: `gen-${Date.now()}-${i}`,
-        imageUrl,
-        specs,
-        info,
-        matchScore
-      } as GeneratedItem;
-    });
-
-    const items = await Promise.all(promises);
-    setGeneratedOptions(items);
-    setGenerationStatus('complete');
-  };
-
-  const handleProductSelect = (item: GeneratedItem) => {
-    setSelectedProduct(item);
-    setCurrentStep(FlowStep.DETAIL);
-    scrollToBottom();
+        const results = await Promise.all(promises);
+        setGeneratedLooks(results);
+        setGenerationStatus('complete');
+    } catch (e) {
+        console.error(e);
+        setGenerationStatus('error');
+    }
   };
 
   const handleVoiceRefinement = async (audioBase64: string) => {
-    if (!selectedProduct) return;
+    if (!selectedLook) return;
     setGenerationStatus('generating');
     
-    const context = `A ${selection.target?.label} ${selection.subCategory?.label}, style: ${selection.stylePreset?.label}`;
+    const context = `Current design: ${selectedLook.info.name}. ${selectedLook.info.description}`;
     const { modification } = await generateFromVoice(audioBase64, context);
-    
     setRefinementPrompt(modification);
     
-    // Regenerate image based on refinement
-    const newImage = await generateItemImage(`${context}. Modification: ${modification}. Apply subtle design changes while keeping the core identity.`);
+    const prompt = `A fashion model wearing ${selectedLook.info.name}. ${modification}. Keep the general style.`;
     
-    setSelectedProduct(prev => prev ? {
-        ...prev,
-        imageUrl: newImage,
-        info: { ...prev.info, stylingTips: `Updated with: "${modification}". ${prev.info.stylingTips}` }
-    } : null);
-    
-    setGenerationStatus('complete');
+    try {
+        const newImage = await generateFashionImage(prompt);
+        
+        setSelectedLook(prev => prev ? {
+            ...prev,
+            imageUrl: newImage,
+            info: { 
+                ...prev.info, 
+                stylingTips: `Updated based on: "${modification}". ${prev.info.stylingTips}` 
+            }
+        } : null);
+    } catch (e) {
+        alert("Failed to refine design.");
+    } finally {
+        setGenerationStatus('complete');
+    }
   };
 
-  // --- Render Helpers ---
+  const handleVisualSearch = (image: string, mode: 'search' | 'bespoke') => {
+    setVisualSearchInitialImage(image);
+    setVisualSearchMode(mode);
+    setIsSearchOpen(true);
+  };
+
+  const handleLookSelect = (look: GeneratedLook) => {
+      setSelectedLook(look);
+      setCurrentStep(FlowStep.DETAIL);
+      scrollToBottom();
+  };
+
+  // --- Render Sections ---
 
   const renderHeader = () => (
-    <header className="fixed top-0 left-0 w-full z-30 bg-white/80 backdrop-blur-md border-b border-gray-100 py-4">
+    <header className="fixed top-0 left-0 w-full z-30 bg-white/90 backdrop-blur-md border-b border-gray-100 py-4 transition-all">
       <div className="container mx-auto max-w-6xl px-6 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-serif font-bold text-brand-black tracking-tight">VISION WEAVER</h1>
-          <span className="text-xs bg-gray-100 px-2 py-0.5 rounded text-brand-gray">STUDIO</span>
         </div>
         <div className="flex items-center gap-4">
-           {/* Steps indicator */}
-           <div className="hidden md:flex gap-1 text-xs font-medium text-gray-400">
-              <span className={selection.target ? 'text-brand-black' : ''}>Target</span>
-              <span>/</span>
-              <span className={selection.category ? 'text-brand-black' : ''}>Category</span>
-              <span>/</span>
-              <span className={selection.stylePreset ? 'text-brand-black' : ''}>Style</span>
+           {/* Progress Indicator */}
+           <div className="hidden md:flex gap-2 text-xs font-medium text-gray-400">
+              <span className={currentStep === FlowStep.TARGET_SELECT ? 'text-brand-black' : ''}>Target</span>/
+              <span className={currentStep === FlowStep.CATEGORY_SELECT ? 'text-brand-black' : ''}>Category</span>/
+              <span className={currentStep === FlowStep.STYLE_SELECT ? 'text-brand-black' : ''}>Style</span>/
+              <span className={currentStep === FlowStep.MOOD_SELECT ? 'text-brand-black' : ''}>Mood</span>
            </div>
-           
+
            <button 
-             className="text-xs underline text-brand-gray hover:text-brand-black transition-colors"
+             className="text-xs font-medium text-brand-black hover:opacity-70 ml-4"
              onClick={() => window.location.reload()}
            >
              Start Over
            </button>
            
-           <div className="h-6 w-px bg-gray-200 mx-2"></div>
+           <div className="w-px h-4 bg-gray-300 mx-2"></div>
 
            <button 
-                onClick={() => handleVisualSearch()}
-                className="text-brand-black hover:text-gray-600 transition-colors p-2 rounded-full hover:bg-gray-100"
-                title="Visual Search"
-            >
-                <span className="material-icons">photo_camera</span>
-            </button>
-           
-           <button 
                 onClick={() => setIsClosetOpen(true)}
-                className="bg-brand-black text-white px-4 py-2 rounded-full text-sm hover:bg-gray-800 transition-all flex items-center gap-2"
+                className="text-brand-black hover:text-gray-600 transition-colors flex items-center gap-2"
             >
-                <span className="material-icons text-base">checkroom</span>
-                <span className="hidden sm:inline">Wardrobe</span>
+                <span className="material-icons">checkroom</span>
+                <span className="hidden sm:inline text-xs font-bold">WARDROBE</span>
             </button>
         </div>
       </div>
@@ -171,10 +190,10 @@ const App: React.FC = () => {
   );
 
   const renderSection = (title: string, subtitle: string, children: React.ReactNode) => (
-    <div className="min-h-[60vh] py-20 flex flex-col items-center animate-fade-in px-4 border-b border-gray-50 last:border-0">
-      <div className="mb-12 text-center max-w-lg">
-        <h2 className="text-4xl font-serif text-brand-black mb-3">{title}</h2>
-        <p className="text-brand-gray font-light text-lg">{subtitle}</p>
+    <div className="py-12 flex flex-col items-center animate-fade-in px-4 border-b border-gray-50 last:border-0">
+      <div className="mb-10 text-center max-w-lg">
+        <h2 className="text-3xl font-serif text-brand-black mb-3">{title}</h2>
+        <p className="text-brand-gray font-light">{subtitle}</p>
       </div>
       <div className="w-full max-w-5xl">
         {children}
@@ -183,7 +202,7 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-white text-brand-black pb-32 pt-16">
+    <div className="min-h-screen bg-white text-brand-black pb-32 pt-20">
       {renderHeader()}
       
       <ClosetSidebar 
@@ -195,11 +214,9 @@ const App: React.FC = () => {
 
       <VisualSearchModal 
         isOpen={isSearchOpen}
-        onClose={() => {
-            setIsSearchOpen(false);
-            setVisualSearchInitialImage(null);
-        }}
+        onClose={() => setIsSearchOpen(false)}
         initialImage={visualSearchInitialImage}
+        initialMode={visualSearchMode}
       />
 
       <div className="container mx-auto max-w-6xl">
@@ -226,28 +243,14 @@ const App: React.FC = () => {
                  key={opt.id} 
                  option={opt} 
                  selected={selection.category?.id === opt.id}
-                 onClick={() => handleSelect('category', opt, FlowStep.SUB_CATEGORY_SELECT)}
+                 onClick={() => handleSelect('category', opt, FlowStep.STYLE_SELECT)}
                />
              ))}
            </div>
         ))}
 
-        {/* Step 3: Sub Category */}
-        {(currentStep === FlowStep.SUB_CATEGORY_SELECT || selection.subCategory) && selection.category && renderSection("Specifics", `Refine your ${selection.category.label.toLowerCase()} choice.`, (
-           <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-             {SUB_CATEGORY_OPTIONS[selection.category.id]?.map(opt => (
-               <SelectionCard 
-                 key={opt.id} 
-                 option={opt} 
-                 selected={selection.subCategory?.id === opt.id}
-                 onClick={() => handleSelect('subCategory', opt, FlowStep.STYLE_PRESET)}
-               />
-             ))}
-           </div>
-        ))}
-
-        {/* Step 4: Style */}
-        {(currentStep === FlowStep.STYLE_PRESET || selection.stylePreset) && renderSection("Aesthetic", "Define the visual language.", (
+        {/* Step 3: Style */}
+        {(currentStep === FlowStep.STYLE_SELECT || currentStep === FlowStep.MOOD_SELECT || selection.stylePreset) && selection.category && renderSection("Aesthetic", "Define the visual language.", (
            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
              {STYLE_PRESETS.map(opt => (
                <SelectionCard 
@@ -260,61 +263,51 @@ const App: React.FC = () => {
            </div>
         ))}
 
-        {/* Step 5: Mood */}
-        {(currentStep === FlowStep.MOOD_SELECT || selection.mood) && renderSection("Context", "Where will this be worn?", (
+        {/* Step 4: Mood */}
+        {(currentStep === FlowStep.MOOD_SELECT || selection.mood) && selection.stylePreset && renderSection("Context", "Where will this be worn?", (
            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
              {MOOD_OPTIONS.map(opt => (
                <SelectionCard 
                  key={opt.id} 
                  option={opt} 
                  selected={selection.mood?.id === opt.id}
-                 onClick={() => {
-                   setSelection(prev => ({ ...prev, mood: opt }));
-                   startGeneration();
-                 }}
+                 onClick={() => handleMoodSelect(opt)}
                />
              ))}
            </div>
         ))}
 
-        {/* Step 6: Generation */}
+        {/* Step 5: Generation */}
         {(currentStep === FlowStep.GENERATION || currentStep === FlowStep.DETAIL) && (
-          <div className="min-h-screen py-16 flex flex-col items-center">
+          <div className="min-h-screen py-16 flex flex-col items-center border-t border-gray-100 mt-8">
              <div className="text-center mb-12">
                 <h2 className="text-3xl font-serif mb-2">
-                    {generationStatus === 'generating' ? 'Creating Designs...' : 'Collection Ready'}
+                    {generationStatus === 'generating' ? 'Creating Collection...' : 'Collection Ready'}
                 </h2>
                 <p className="text-brand-gray">AI is synthesizing trends and materials.</p>
              </div>
             
-            {generationStatus === 'generating' && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full px-4 max-w-6xl">
-                {[1,2,3,4].map(i => (
+            {generationStatus === 'generating' ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full px-4 max-w-6xl">
+                {[1,2,3].map(i => (
                   <div key={i} className="aspect-[3/4] bg-gray-100 animate-pulse rounded-lg"></div>
                 ))}
               </div>
-            )}
-
-            {generationStatus === 'complete' && !selectedProduct && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full px-4 max-w-6xl">
-                {generatedOptions.map((item) => (
-                  <div key={item.id} className="group relative">
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full px-4 max-w-6xl">
+                {generatedLooks.map((look) => (
+                  <div key={look.id} className="group relative">
                     <div 
-                      onClick={() => handleProductSelect(item)}
+                      onClick={() => handleLookSelect(look)}
                       className="cursor-pointer bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300"
                     >
-                      <div className="aspect-[3/4] overflow-hidden">
-                          <img src={item.imageUrl} alt="Generated" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <div className="aspect-[3/4] overflow-hidden relative">
+                          <img src={look.imageUrl} alt="Generated" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors"></div>
                       </div>
-                      <div className="p-4">
-                          <h3 className="font-sans font-medium text-brand-black truncate">{item.info.name}</h3>
-                          {item.matchScore !== undefined && (
-                            <div className="mt-2 flex items-center gap-2">
-                                <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                                    {item.matchScore}% Match
-                                </span>
-                            </div>
-                          )}
+                      <div className="p-6">
+                          <h3 className="font-serif text-xl text-brand-black truncate">{look.info.name}</h3>
+                          <p className="text-sm text-gray-500 mt-1">{look.info.description}</p>
                       </div>
                     </div>
                   </div>
@@ -324,106 +317,96 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Step 7: Detail View */}
-        {currentStep === FlowStep.DETAIL && selectedProduct && (
-          <div className="fixed inset-0 z-50 bg-white overflow-y-auto">
-             <div className="max-w-7xl mx-auto p-4 md:p-12 flex flex-col lg:flex-row gap-16 animate-fade-in">
-               
-               {/* Close / Back */}
-               <button 
-                  onClick={() => setCurrentStep(FlowStep.GENERATION)}
-                  className="absolute top-6 left-6 z-50 bg-white/90 p-2 rounded-full shadow-lg hover:bg-gray-100"
-               >
-                 <span className="material-icons">arrow_back</span>
-               </button>
+        {/* Detail Modal */}
+        {currentStep === FlowStep.DETAIL && selectedLook && (
+           <div className="fixed inset-0 z-50 bg-white overflow-y-auto animate-fade-in">
+              <div className="max-w-7xl mx-auto p-4 md:p-12 flex flex-col lg:flex-row gap-16">
+                  
+                  <button 
+                    onClick={() => setCurrentStep(FlowStep.GENERATION)}
+                    className="absolute top-6 left-6 z-50 bg-white/90 p-3 rounded-full shadow-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <span className="material-icons text-brand-black">arrow_back</span>
+                  </button>
 
-               {/* Left: Images */}
-               <div className="flex-1 lg:max-w-2xl">
-                 <div className="bg-gray-50 rounded-xl overflow-hidden shadow-sm">
-                    <img src={selectedProduct.imageUrl} className="w-full h-auto object-cover" />
-                 </div>
-                 
-                 {/* Voice Refinement */}
-                 <div className="mt-8 flex flex-col items-center p-6 bg-gray-50 rounded-xl">
-                    <h4 className="font-serif text-lg mb-2">AI Designer Assistant</h4>
-                    <p className="text-sm text-brand-gray text-center mb-4 max-w-xs">
-                        "Too dark", "Make it cleaner", "More casual". <br/>Speak to refine the design instantly.
-                    </p>
-                    <VoiceInput 
-                        isProcessing={generationStatus === 'generating'}
-                        onAudioRecorded={handleVoiceRefinement}
-                    />
-                    {refinementPrompt && (
-                        <p className="text-xs text-brand-black mt-2 bg-white px-3 py-1 rounded border border-gray-200">
-                            Last edit: "{refinementPrompt}"
-                        </p>
-                    )}
-                 </div>
-               </div>
-
-               {/* Right: Info */}
-               <div className="flex-1 pt-4">
-                 <div className="mb-8 pb-8 border-b border-gray-100">
-                    <span className="text-sm text-brand-gray uppercase tracking-widest">{selectedProduct.info.materials}</span>
-                    <h1 className="text-4xl font-serif font-bold text-brand-black mt-2 mb-4">{selectedProduct.info.name}</h1>
-                    <p className="text-lg text-gray-600 leading-relaxed font-light">
-                        {selectedProduct.info.description}
-                    </p>
-                    {selectedProduct.matchScore !== undefined && (
-                        <div className="mt-6 inline-flex items-center gap-3 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100">
-                             <span className="material-icons text-brand-black">checkroom</span>
-                             <span className="text-sm font-medium">Matches your wardrobe by <span className="text-brand-black font-bold">{selectedProduct.matchScore}%</span></span>
-                        </div>
-                    )}
-                 </div>
-
-                 <div className="grid grid-cols-2 gap-x-12 gap-y-8 mb-12">
-                     <div>
-                         <h3 className="font-bold text-sm uppercase text-brand-black mb-3">Styling Tips</h3>
-                         <p className="text-sm text-gray-600 leading-relaxed">{selectedProduct.info.stylingTips}</p>
-                     </div>
-                     <div>
-                         <h3 className="font-bold text-sm uppercase text-brand-black mb-3">Product Specs</h3>
-                         <ul className="space-y-2 text-sm text-gray-600">
-                             <li className="flex justify-between">
-                                 <span>Versatility</span>
-                                 <div className="w-24 h-1.5 bg-gray-200 rounded-full mt-2">
-                                     <div className="h-full bg-brand-black rounded-full" style={{width: `${selectedProduct.specs.versatility}%`}}></div>
+                  {/* Left: Image */}
+                  <div className="w-full lg:w-1/2">
+                      <div className="sticky top-8">
+                         <div className="rounded-xl overflow-hidden shadow-sm bg-gray-50">
+                             <img src={selectedLook.imageUrl} alt="Detail" className="w-full h-auto object-cover" />
+                         </div>
+                         
+                         {/* Voice Controls */}
+                         <div className="mt-8 p-6 bg-gray-50 rounded-xl border border-gray-100">
+                             <div className="flex items-center justify-between mb-4">
+                                 <div>
+                                     <h3 className="font-serif text-lg font-bold">AI Design Assistant</h3>
+                                     <p className="text-sm text-gray-500">Refine this look with your voice.</p>
                                  </div>
-                             </li>
-                             <li className="flex justify-between">
-                                 <span>Comfort</span>
-                                 <div className="w-24 h-1.5 bg-gray-200 rounded-full mt-2">
-                                     <div className="h-full bg-brand-black rounded-full" style={{width: `${selectedProduct.specs.comfort}%`}}></div>
-                                 </div>
-                             </li>
-                             <li className="flex justify-between">
-                                 <span>Trend</span>
-                                 <div className="w-24 h-1.5 bg-gray-200 rounded-full mt-2">
-                                     <div className="h-full bg-brand-black rounded-full" style={{width: `${selectedProduct.specs.trend}%`}}></div>
-                                 </div>
-                             </li>
-                         </ul>
-                     </div>
-                 </div>
+                                 <VoiceInput 
+                                    isProcessing={generationStatus === 'generating'}
+                                    onAudioRecorded={handleVoiceRefinement}
+                                 />
+                             </div>
+                             {refinementPrompt && (
+                                 <p className="text-xs text-gray-400 italic">Last edit: "{refinementPrompt}"</p>
+                             )}
+                         </div>
+                      </div>
+                  </div>
 
-                 {/* Actions */}
-                 <div className="space-y-4">
-                    <button 
-                        onClick={() => handleVisualSearch(selectedProduct.imageUrl)}
-                        className="block w-full py-4 bg-brand-black text-white text-center font-medium rounded hover:bg-gray-800 transition-colors shadow-lg flex items-center justify-center gap-2"
-                    >
-                         <span className="material-icons text-base">shopping_search</span>
-                         Find Similar Items Online
-                    </button>
-                    <button className="block w-full py-4 bg-white border border-brand-black text-brand-black text-center font-medium rounded hover:bg-gray-50 transition-colors">
-                        Save to Collection
-                    </button>
-                 </div>
+                  {/* Right: Info */}
+                  <div className="w-full lg:w-1/2 pt-4 lg:pt-12 pb-20">
+                       <span className="text-sm tracking-widest uppercase text-brand-gray block mb-4">{selectedLook.info.materials}</span>
+                       <h1 className="text-5xl font-serif font-bold text-brand-black mb-6 leading-tight">{selectedLook.info.name}</h1>
+                       <p className="text-lg text-gray-600 mb-10 leading-relaxed font-light">
+                           {selectedLook.info.description}
+                       </p>
 
-               </div>
-             </div>
-          </div>
+                       <div className="grid grid-cols-2 gap-x-8 gap-y-12 mb-12">
+                           <div>
+                               <h4 className="font-bold text-sm uppercase text-brand-black mb-3 border-b border-gray-100 pb-2">Styling Notes</h4>
+                               <p className="text-sm text-gray-600 leading-relaxed">{selectedLook.info.stylingTips}</p>
+                           </div>
+                           <div>
+                               <h4 className="font-bold text-sm uppercase text-brand-black mb-3 border-b border-gray-100 pb-2">Design Specs</h4>
+                               <ul className="space-y-3">
+                                   <li className="flex justify-between text-sm">
+                                       <span className="text-gray-500">Versatility</span>
+                                       <span className="font-bold">{selectedLook.specs.versatility}/100</span>
+                                   </li>
+                                   <li className="flex justify-between text-sm">
+                                       <span className="text-gray-500">Trend Factor</span>
+                                       <span className="font-bold">{selectedLook.specs.trend}/100</span>
+                                   </li>
+                                   <li className="flex justify-between text-sm">
+                                       <span className="text-gray-500">Comfort</span>
+                                       <span className="font-bold">{selectedLook.specs.comfort}/100</span>
+                                   </li>
+                               </ul>
+                           </div>
+                       </div>
+
+                       <div className="space-y-4">
+                           <button 
+                               onClick={() => handleVisualSearch(selectedLook.imageUrl, 'search')}
+                               className="w-full py-4 bg-brand-black text-white text-center font-bold rounded hover:bg-gray-800 transition-colors shadow-xl flex items-center justify-center gap-3"
+                           >
+                               <span className="material-icons">shopping_search</span>
+                               Find Similar Items Online
+                           </button>
+                           
+                           <button 
+                               onClick={() => handleVisualSearch(selectedLook.imageUrl, 'bespoke')}
+                               className="w-full py-4 bg-white border border-brand-black text-brand-black text-center font-bold rounded hover:bg-gray-50 transition-colors flex items-center justify-center gap-3"
+                           >
+                               <span className="material-icons">architecture</span>
+                               Request Bespoke Quote
+                           </button>
+                       </div>
+                  </div>
+              </div>
+           </div>
         )}
 
         <div ref={endOfListRef} />

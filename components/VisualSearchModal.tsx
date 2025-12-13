@@ -6,14 +6,16 @@ interface VisualSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialImage?: string | null;
+  initialMode?: 'search' | 'bespoke';
 }
 
-export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, onClose, initialImage }) => {
+export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, onClose, initialImage, initialMode = 'search' }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageLoadError, setImageLoadError] = useState(false);
   
   // Search State
   const [isSearching, setIsSearching] = useState(false);
@@ -32,20 +34,34 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
     if (imgSrc.startsWith('data:')) {
       return imgSrc.split(',')[1];
     } else if (imgSrc.startsWith('http')) {
+      // Use Image object + Canvas to bypass some simple CORS issues if server allows anonymous
       try {
-        const response = await fetch(imgSrc);
-        const blob = await response.blob();
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const res = reader.result as string;
-                resolve(res.split(',')[1]);
-            };
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(blob);
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.src = imgSrc;
+        
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
         });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        
+        ctx.drawImage(img, 0, 0);
+        // This might fail if the image is tainted (CORS)
+        try {
+            return canvas.toDataURL('image/jpeg').split(',')[1];
+        } catch (e) {
+            console.error("Canvas tainted", e);
+            // Fallback: If we can't read the canvas, we can't search this specific image URL
+            return null;
+        }
       } catch (e) {
-        console.error("Failed to fetch image for search", e);
+        console.error("Failed to load image for search", e);
         return null;
       }
     }
@@ -54,31 +70,36 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
 
   // Handle initialization and cleanup
   useEffect(() => {
-    if (isOpen) {
-      if (initialImage) {
+    if (isOpen && initialImage) {
         setSelectedImage(initialImage);
+        setImageLoadError(false);
         // Reset previous states
         setResult(null);
         setQuote(null);
         setOrderSent(false);
+        setCalculatingQuote(false);
+        setIsSearching(false);
         
-        // Start search
-        const run = async () => {
+        const init = async () => {
              const data = await getImageData(initialImage);
-             if (data) {
-                 performSearch(data);
+             if (!data) {
+                 setImageLoadError(true);
+                 return;
+             }
+             
+             if (initialMode === 'bespoke') {
+                 handleGetQuoteWithData(data);
              } else {
-                 console.error("Could not process initial image");
+                 performSearch(data);
              }
         };
-        run();
-      }
-    } else {
+        init();
+    } else if (!isOpen) {
       // Cleanup when closed
       stopCamera();
       reset();
     }
-  }, [isOpen, initialImage]);
+  }, [isOpen, initialImage, initialMode]);
 
   const startCamera = async () => {
     try {
@@ -155,19 +176,26 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
     }
   };
 
-  const handleGetQuote = async () => {
-      if (!selectedImage) return;
+  const handleGetQuoteWithData = async (base64Data: string) => {
       setCalculatingQuote(true);
+      setQuote(null);
       try {
-          const data = await getImageData(selectedImage);
-          if (data) {
-              const quoteData = await estimateBespokeCost(data);
-              setQuote(quoteData);
-          }
+          const quoteData = await estimateBespokeCost(base64Data);
+          setQuote(quoteData);
       } catch (e) {
           console.error(e);
       } finally {
           setCalculatingQuote(false);
+      }
+  };
+
+  const handleGetQuote = async () => {
+      if (!selectedImage) return;
+      const data = await getImageData(selectedImage);
+      if (data) {
+         handleGetQuoteWithData(data);
+      } else {
+          alert("Unable to process this image for quote.");
       }
   };
 
@@ -182,6 +210,7 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
     setQuote(null);
     setOrderSent(false);
     setIsCameraOpen(false);
+    setImageLoadError(false);
   };
 
   if (!isOpen) return null;
@@ -200,8 +229,12 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
           <div className="flex items-center gap-2">
-             <span className="material-icons text-brand-black">photo_camera</span>
-             <h2 className="text-xl font-serif font-bold text-brand-black">Visual Search</h2>
+             <span className="material-icons text-brand-black">
+                 {initialMode === 'bespoke' ? 'architecture' : 'photo_camera'}
+             </span>
+             <h2 className="text-xl font-serif font-bold text-brand-black">
+                 {initialMode === 'bespoke' ? 'Bespoke Studio' : 'Visual Search'}
+             </h2>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
             <span className="material-icons text-gray-500">close</span>
@@ -291,65 +324,87 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
 
               {/* Results List */}
               <div className="flex-1 space-y-4">
-                {isSearching ? (
-                  <div className="py-12 flex flex-col items-center text-center">
-                    <div className="animate-spin h-8 w-8 border-2 border-brand-black border-t-transparent rounded-full mb-4"></div>
-                    <p className="text-sm font-medium text-brand-black">Analyzing style & material...</p>
-                    <p className="text-xs text-brand-gray">Searching global retailers</p>
-                  </div>
-                ) : result ? (
-                  <div className="animate-fade-in pb-20">
-                    <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-100">
-                      <h3 className="text-xs font-bold uppercase text-brand-gray mb-2">AI Analysis</h3>
-                      <p className="text-sm text-gray-800 leading-relaxed">{result.description}</p>
+                
+                {imageLoadError && (
+                    <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-100">
+                        <p className="font-bold mb-1">Image Analysis Failed</p>
+                        <p>We couldn't analyze this image due to security restrictions on the image source. Please try saving the image and uploading it manually.</p>
+                        <button onClick={reset} className="mt-2 text-red-800 underline font-medium">Try another image</button>
                     </div>
+                )}
 
-                    <h3 className="text-sm font-bold text-brand-black mb-3 flex items-center gap-2">
-                      <span className="material-icons text-sm">shopping_bag</span>
-                      Found Online
-                    </h3>
-                    
-                    {result.links.length > 0 ? (
-                      <div className="space-y-2 mb-8">
-                        {result.links.map((link, idx) => (
-                          <a 
-                            key={idx}
-                            href={link.uri}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-brand-black hover:bg-gray-50 transition-all group"
-                          >
-                             <div className="bg-white p-2 rounded border border-gray-100 text-gray-400 group-hover:text-brand-black">
-                               <span className="material-icons text-sm">link</span>
-                             </div>
-                             <div className="flex-1 min-w-0">
-                               <p className="text-sm font-medium text-brand-black truncate group-hover:underline">
-                                 {link.title}
-                               </p>
-                               <p className="text-xs text-gray-400 truncate">{link.uri}</p>
-                             </div>
-                             <span className="material-icons text-gray-300 text-sm">open_in_new</span>
-                          </a>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-6 text-gray-500 text-sm bg-gray-50 rounded-lg mb-8">
-                        No similar items found in stock.
-                      </div>
-                    )}
+                {/* SEARCH SECTION */}
+                {!imageLoadError && initialMode === 'search' && (
+                    <>
+                        {isSearching ? (
+                            <div className="py-12 flex flex-col items-center text-center">
+                                <div className="animate-spin h-8 w-8 border-2 border-brand-black border-t-transparent rounded-full mb-4"></div>
+                                <p className="text-sm font-medium text-brand-black">Analyzing style & material...</p>
+                                <p className="text-xs text-brand-gray">Searching global retailers</p>
+                            </div>
+                        ) : result ? (
+                            <div className="animate-fade-in">
+                                <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-100">
+                                <h3 className="text-xs font-bold uppercase text-brand-gray mb-2">AI Analysis</h3>
+                                <p className="text-sm text-gray-800 leading-relaxed">{result.description}</p>
+                                </div>
 
-                    {/* BESPOKE SECTION */}
-                    <div className="border-t border-gray-100 pt-8 mt-8">
+                                <h3 className="text-sm font-bold text-brand-black mb-3 flex items-center gap-2">
+                                <span className="material-icons text-sm">shopping_bag</span>
+                                Found Online
+                                </h3>
+                                
+                                {result.links.length > 0 ? (
+                                <div className="space-y-2 mb-8">
+                                    {result.links.map((link, idx) => (
+                                    <a 
+                                        key={idx}
+                                        href={link.uri}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-brand-black hover:bg-gray-50 transition-all group"
+                                    >
+                                        <div className="bg-white p-2 rounded border border-gray-100 text-gray-400 group-hover:text-brand-black">
+                                        <span className="material-icons text-sm">link</span>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-brand-black truncate group-hover:underline">
+                                            {link.title}
+                                        </p>
+                                        <p className="text-xs text-gray-400 truncate">{link.uri}</p>
+                                        </div>
+                                        <span className="material-icons text-gray-300 text-sm">open_in_new</span>
+                                    </a>
+                                    ))}
+                                </div>
+                                ) : (
+                                <div className="text-center py-6 text-gray-500 text-sm bg-gray-50 rounded-lg mb-8">
+                                    No similar items found in stock.
+                                </div>
+                                )}
+                            </div>
+                        ) : null}
+                    </>
+                )}
+
+                {/* BESPOKE SECTION */}
+                {!imageLoadError && (initialMode === 'bespoke' || result) && (
+                    <div className={`${initialMode === 'search' ? 'border-t border-gray-100 pt-8 mt-8' : 'pt-0'}`}>
                         <div className="bg-brand-black text-white p-6 rounded-xl shadow-lg relative overflow-hidden">
                             <div className="absolute top-0 right-0 p-8 opacity-10">
                                 <span className="material-icons text-9xl">architecture</span>
                             </div>
-                            <h3 className="text-xl font-serif font-bold mb-2 relative z-10">Can't find it? Make it.</h3>
+                            <h3 className="text-xl font-serif font-bold mb-2 relative z-10">
+                                {initialMode === 'bespoke' ? 'Bespoke Cost Estimate' : "Can't find it? Make it."}
+                            </h3>
                             <p className="text-sm text-gray-300 mb-6 max-w-xs relative z-10">
-                                Our AI Meister can deconstruct this design and estimate the cost for a bespoke, made-to-order piece.
+                                {initialMode === 'bespoke' 
+                                    ? "Our AI Meister will deconstruct this design and estimate the cost for a custom piece."
+                                    : "Our AI Meister can deconstruct this design and estimate the cost for a bespoke, made-to-order piece."
+                                }
                             </p>
                             
-                            {!quote && !calculatingQuote && (
+                            {!quote && !calculatingQuote && initialMode === 'search' && (
                                 <button 
                                     onClick={handleGetQuote}
                                     className="bg-white text-brand-black px-6 py-3 rounded-lg font-bold text-sm hover:bg-gray-100 transition-colors w-full sm:w-auto relative z-10"
@@ -405,8 +460,7 @@ export const VisualSearchModal: React.FC<VisualSearchModalProps> = ({ isOpen, on
                             )}
                         </div>
                     </div>
-                  </div>
-                ) : null}
+                )}
               </div>
             </div>
           )}

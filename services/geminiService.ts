@@ -1,26 +1,54 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { GeneratedItem, ProductSpecs, ProductInfo, ClosetItem, SearchResult, BespokeQuote } from '../types';
+import { GeneratedLook, ProductSpecs, ProductInfo, SearchResult, BespokeQuote, ClosetAnalysis } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-export const generateProductDetails = async (
-  features: string,
-  closetContext?: string
-): Promise<{ specs: ProductSpecs; info: ProductInfo; matchScore?: number }> => {
+export const generateFashionImage = async (
+  prompt: string
+): Promise<string> => {
+  try {
+    // Generate a high-fashion editorial style image
+    // Updated prompt to force model presence and focus on clothing
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [{ text: `High-quality fashion photography. A professional model posing wearing: ${prompt}. The image MUST depict a person wearing the described clothing. Focus on the apparel design, fabric textures, and styling. Cinematic lighting, 8k resolution, photorealistic, vogue magazine style.` }],
+      },
+      config: {
+        imageConfig: {
+            aspectRatio: "3:4", // Portrait for fashion looks
+        }
+      }
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:image/png;base64,${part.inlineData.data}`;
+      }
+    }
+    throw new Error("No image generated");
+  } catch (error) {
+    console.error("Image generation failed:", error);
+    // Fallback if image generation completely fails
+    return "https://images.unsplash.com/photo-1532453288672-3a27e9be9efd?w=500&q=80";
+  }
+};
+
+export const generateLookDetails = async (
+  styleDescription: string
+): Promise<{ specs: ProductSpecs; info: ProductInfo }> => {
   try {
     const prompt = `
-      You are a Senior Fashion Designer and Stylist for a modern apparel brand like Uniqlo, H&M, or COS.
-      Design a product with these features: "${features}".
-      ${closetContext ? `Also analyze stylistic compatibility with this item from the user's wardrobe: ${closetContext}. Give a score 0-100.` : ''}
+      You are a Creative Director for a luxury fashion brand.
+      Create a product profile for this design concept: "${styleDescription}".
       
       Return JSON with:
       - specs: comfort, versatility, trend, warmth, price_tier (all 0-100 integers)
       - info: 
-          name (Catchy, modern product name like "Cotton Oversized Tee"), 
-          description (Professional e-commerce description, max 2 sentences), 
-          stylingTips (How to wear it, e.g., "Pair with wide-fit jeans."), 
-          materials (e.g., "100% Organic Cotton")
-      ${closetContext ? '- matchScore: 0-100' : ''}
+          name (A sophisticated, short name. e.g. "The Midnight Wool Coat"), 
+          description (Evocative description of the design, fabric, and mood. Max 2 sentences.), 
+          stylingTips (Specific advice on how to style this item.), 
+          materials (Premium material composition, e.g. "Italian Merino Wool, Silk Lining")
     `;
 
     const response = await ai.models.generateContent({
@@ -49,8 +77,7 @@ export const generateProductDetails = async (
                 stylingTips: { type: Type.STRING },
                 materials: { type: Type.STRING },
               }
-            },
-            matchScore: { type: Type.INTEGER }
+            }
           }
         }
       }
@@ -60,76 +87,22 @@ export const generateProductDetails = async (
     if (!text) throw new Error("No text response");
     return JSON.parse(text);
   } catch (error) {
-    console.error("Lore generation failed:", error);
+    console.error("Detail generation failed:", error);
     return {
-      specs: { comfort: 80, versatility: 80, trend: 50, warmth: 50, price_tier: 50 },
-      info: { name: "Classic Staple", description: "A timeless piece for any wardrobe.", stylingTips: "Versatile enough for any occasion.", materials: "Cotton Blend" },
-      matchScore: 50
+      specs: { comfort: 80, versatility: 80, trend: 80, warmth: 50, price_tier: 50 },
+      info: { name: "Signature Look", description: "A timeless design.", stylingTips: "Wear with confidence.", materials: "Premium Blend" }
     };
   }
 };
 
-export const generateItemImage = async (prompt: string, aspectRatio: string = "1:1"): Promise<string> => {
-  try {
-    // Generate clean e-commerce style image
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: [{ text: `Professional studio fashion photography of: ${prompt}. Clean white background, soft studio lighting, catalogue style, H&M or Uniqlo aesthetic. High resolution.` }],
-      },
-      config: {
-        imageConfig: {
-            aspectRatio: aspectRatio as any, 
-        }
-      }
-    });
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
-    }
-    throw new Error("No image generated");
-  } catch (error) {
-    console.error("Image generation failed", error);
-    return `https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=500&q=80`;
-  }
-};
-
-export const analyzeClosetImage = async (base64Image: string): Promise<ClosetItem['analysis']> => {
+export const generateFromVoice = async (audioBase64: string, currentContext: string): Promise<{ modification: string }> => {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [
-          { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Analyze this clothing item for a fashion app. Return JSON with 'color', 'style' (e.g. casual, formal), 'season', and 'material'." }
-        ]
-      },
-      config: {
-        responseMimeType: "application/json"
-      }
-    });
-    
-    if (response.text) {
-        return JSON.parse(response.text);
-    }
-    throw new Error("Analysis failed");
-
-  } catch (e) {
-    console.error(e);
-    return { color: 'Unknown', style: 'Unknown', season: 'All', material: 'Unknown' };
-  }
-}
-
-export const generateFromVoice = async (audioBase64: string, currentContext: string): Promise<{ modification: string }> => {
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash', // Supports audio input
-      contents: {
-        parts: [
           { inlineData: { mimeType: 'audio/wav', data: audioBase64 } },
-          { text: `The user is describing how to modify this fashion design: "${currentContext}". Interpret the feedback (including abstract words like 'softer', 'bolder'). Return a short text description of the design change needed.` }
+          { text: `The user is providing feedback on this fashion design: "${currentContext}". Interpret the audio. Return a concise visual description of how the design should change (e.g. "Change the color to midnight blue", "Add a belt").` }
         ]
       }
     });
@@ -147,7 +120,7 @@ export const searchItemByImage = async (base64Image: string): Promise<SearchResu
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { text: "Identify this fashion item in detail (brand, style, material). Find similar items for sale online. Return a helpful description for a shopper." }
+          { text: "Identify the main fashion item in this image. Find where to buy similar items online. Return links." }
         ]
       },
       config: {
@@ -156,9 +129,6 @@ export const searchItemByImage = async (base64Image: string): Promise<SearchResu
     });
 
     const description = response.text || "No description found.";
-    
-    // Extract grounding chunks for links
-    // The path is response.candidates[0].groundingMetadata.groundingChunks
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const links: { title: string; uri: string }[] = [];
 
@@ -171,7 +141,6 @@ export const searchItemByImage = async (base64Image: string): Promise<SearchResu
       }
     });
 
-    // Remove duplicates
     const uniqueLinks = links.filter((link, index, self) => 
       index === self.findIndex((l) => l.uri === link.uri)
     );
@@ -180,60 +149,94 @@ export const searchItemByImage = async (base64Image: string): Promise<SearchResu
   } catch (error) {
     console.error("Visual search failed:", error);
     return { 
-      description: "Could not perform visual search at this time.", 
+      description: "Could not perform visual search.", 
       links: [] 
     };
   }
 };
 
 export const estimateBespokeCost = async (base64Image: string): Promise<BespokeQuote> => {
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: {
+          parts: [
+            { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
+            { 
+              text: `You are a master tailor. Analyze this garment. Estimate the cost to create a bespoke version.
+              
+              Return JSON with:
+              - fabricName: string
+              - fabricCost: number
+              - laborHours: number
+              - laborCost: number
+              - totalCost: number
+              - timeline: string
+              - complexity: "Low" | "Medium" | "High" | "Masterpiece"
+              - comments: string`
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+  
+      if (response.text) {
+        return JSON.parse(response.text);
+      }
+      throw new Error("Analysis failed");
+    } catch (e) {
+      console.error(e);
+      return {
+        fabricName: "Standard Fabric",
+        fabricCost: 100,
+        laborHours: 20,
+        laborCost: 1000,
+        totalCost: 1300,
+        timeline: "4 weeks",
+        complexity: "Medium",
+        comments: "Estimation failed, using standard values."
+      };
+    }
+}
+
+export const analyzeClosetImage = async (base64Image: string): Promise<ClosetAnalysis> => {
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
-          { 
-            text: `You are a master tailor for high-end bespoke fashion. Analyze this garment image to create a manufacturing cost estimate for a single custom-made piece.
-            
-            Deconstruct the item into:
-            1. Fabric: Identify likely fabric (e.g., Italian Wool, Silk) and estimate yardage required. Estimate cost per yard (premium quality).
-            2. Labor: Estimate hours for pattern making, cutting, and sewing by a skilled tailor.
-            3. Complexity: Assess construction difficulty.
-
-            Return JSON with:
-            - fabricName: string
-            - fabricCost: number (Total fabric cost in USD)
-            - laborHours: number
-            - laborCost: number (Total labor cost in USD, assume $50/hr)
-            - totalCost: number (Sum + 20% margin)
-            - timeline: string (e.g., "4-6 weeks")
-            - complexity: "Low" | "Medium" | "High" | "Masterpiece"
-            - comments: string (Brief expert assessment of construction)`
-          }
+          { text: "Analyze this clothing item. Identify style, color, material, and season." }
         ]
       },
       config: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+                style: { type: Type.STRING },
+                color: { type: Type.STRING },
+                material: { type: Type.STRING },
+                season: { type: Type.STRING },
+            }
+        }
       }
     });
 
-    if (response.text) {
-      return JSON.parse(response.text);
+    const text = response.text;
+    if (text) {
+      return JSON.parse(text);
     }
-    throw new Error("Analysis failed");
-  } catch (e) {
-    console.error(e);
-    // Fallback estimate
+    throw new Error("No text response");
+  } catch (error) {
+    console.error("Closet analysis failed:", error);
     return {
-      fabricName: "Standard Fabric",
-      fabricCost: 50,
-      laborHours: 10,
-      laborCost: 500,
-      totalCost: 650,
-      timeline: "4 weeks",
-      complexity: "Medium",
-      comments: "Estimation failed, using standard values."
+      style: "Casual",
+      color: "Multi-color",
+      material: "Unknown",
+      season: "Any"
     };
   }
-}
+};

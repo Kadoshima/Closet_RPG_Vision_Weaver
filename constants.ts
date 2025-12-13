@@ -38,13 +38,13 @@ export const SUB_CATEGORY_OPTIONS: Record<string, CardOption[]> = {
 
 export const STYLE_PRESETS: CardOption[] = [
   { id: 'minimal', label: 'Minimal', description: 'Clean, simple, essential. Like Uniqlo U.', image: 'https://images.unsplash.com/photo-1434389677669-e08b4cac3105?w=500&q=80' },
-  { id: 'street', label: 'Street', description: 'Bold, oversized, trendy.', image: 'https://images.unsplash.com/photo-1523396896308-1b58030be2f2?w=500&q=80' },
+  { id: 'street', label: 'Street', description: 'Bold, oversized, trendy.', image: 'https://images.unsplash.com/photo-1552374196-1ab2a1c593e8?w=500&q=80' },
   { id: 'classic', label: 'Classic', description: 'Timeless, tailored, smart.', image: 'https://images.unsplash.com/photo-1487222477894-8943e31ef7b2?w=500&q=80' },
   { id: 'casual', label: 'Casual', description: 'Relaxed, everyday comfort.', image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=500&q=80' },
 ];
 
 export const MOOD_OPTIONS: CardOption[] = [
-  { id: 'city', label: 'City Life', description: 'Urban, sleek, day-to-night.', image: 'https://images.unsplash.com/photo-1449156493391-d2cfa28e468b?w=500&q=80' },
+  { id: 'city', label: 'City Life', description: 'Urban, sleek, day-to-night.', image: 'https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=500&q=80' },
   { id: 'vacation', label: 'Vacation', description: 'Resort, airy, relaxed.', image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=500&q=80' },
   { id: 'office', label: 'Office', description: 'Professional, sharp.', image: 'https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=500&q=80' },
   { id: 'cozy', label: 'Weekend', description: 'Soft, warm, homey.', image: 'https://images.unsplash.com/photo-1512918760532-3c50f4a2b04e?w=500&q=80' },
